@@ -1,0 +1,204 @@
+---
+title: "Human Activity Recognition using R"
+output:
+  html_document:
+    df_print: paged
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(caret)
+set.seed(3535)
+
+```
+
+# Abstract
+
+Human Activity Recognition - HAR - has emerged as a key research area in the last years. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises.
+In the present article we will create and compare several models to create a prediction function
+for a dataset with 5 classes (sitting-down, standing-up, standing, walking, and sitting) collected on 8 hours of activities of 4 healthy subjects. See *Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements*. Full link in the *Reference* section below.
+
+# Data
+
+### Download
+
+First we download the training and testing data:
+```{r}
+setwd("/Users/cjr/coursera/DataScience_With_R/")
+if (! file.exists("pml-training.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+}
+if (! file.exists("pml-testing.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+}
+```
+
+Now we can read it. We convert the strings representing missing values to the **NA** value.
+```{r}
+setwd("/Users/cjr/coursera/DataScience_With_R/")
+training <- read.csv("pml-training.csv", na.strings=c("NA", "", "#DIV/0!"))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA", "", "#DIV/0!"))
+```
+
+What we seek to predict is the class of training, which is represented by ['A', ..., 'E'] in the variable **classe**.
+
+```{r}
+barplot(table(training$classe), main="Occurrences of the different classes of training exercises", xlab="Class", ylab="Occurrences")
+```
+
+We see a difference in the number of occurrences. As all classes are represented by some thousands of samples, the degree to which the dataset is skewed is unlikely to adversely affect the outcome.
+
+### Remove columns not relevant for prediction
+
+Let's look at the columns of the loaded data:
+```{r}
+names(training)
+```
+
+The columns:
+
+*  X
+*  user_name
+*  raw_timestamp_part_1
+*  raw_timestamp_part_2
+*  cvtd_timestamp
+*  new_window
+*  num_window
+
+all serve to identify the recording and are not part of the measurement of actions.
+
+We can therefor remove them. They have the first seven indexes.
+
+```{r}
+training <- training[,-c(1:7)]
+testing <- testing[,-c(1:7)]
+dim(training)
+```
+
+### Replace unlikely predictors in the data
+
+We remove columns with near zero variance and columns with mostly (> 50%) NA values from the training set. Then we split our training set into two parts: one for actually training and the second, "out of sample" part, for testing the training result.
+
+```{r}
+training <- training[,-nearZeroVar(training)]
+training <- training[, -which(colMeans(is.na(training)) > 0.5)]
+```
+
+### Creating an out-of-sample part
+
+If we use all available training data for actually training the model, we will have no
+independent information on how well the model actually is, that is, it might be
+overfitting.
+
+To get an informed idea of how well the model we create is doing we set aside a part of the
+data and use it for validation only. Here we use 70% of the data for training and 30% for validation because such a division conforms to a good heuristic.
+
+```{r}
+train_rows <- createDataPartition(training$classe,p=0.7,list=FALSE)
+trainPart <- training[train_rows,]
+testPart <- training[-train_rows,]
+```
+
+### Cross-validation
+
+For the in-sample-part we set cross-validation with 5 folds. This means that different partitions of the data are made where a part used for validation will in the next partitioning be used for training etc. This serves to diminish the influence of outliers in specific parts of the data.
+```{r}
+trctrl <- trainControl(method = "cv", number = 10)
+```
+
+# Modeling the data
+
+We will model the data using three algorithms:
+
+* (Linear) Support Vector Machine
+* Random Forst
+* Stochastic Gradient Boosting
+
+
+### Support Vector Machine
+
+```{r}
+# Support Vector Machine
+svm <- train(classe ~., data=trainPart, method = "svmLinear", trControl=trctrl, verbose=FALSE)
+svm
+```
+
+
+### Random Forest
+```{r}
+# Random forest
+rf <- train(classe ~., data=trainPart, method = "rf", trControl=trctrl, verbose=FALSE)
+rf
+```
+
+```{r}
+plot(rf, main="Random Forest")
+```
+
+We see that the influence of adding additional parameters to make the prediction steeply decreases before the number of considered parameters is thirty.
+
+### Stochastic Gradient Boosting
+```{r}
+# GBM
+gbm <- train(classe ~., data=trainPart, method = "gbm", trControl=trctrl, verbose=FALSE)
+gbm
+```
+
+```{r}
+plot(gbm, main="Stochastic Gradient Boosting")
+```
+
+We see that a depth of 3 gives higher accuracy than a depth < 3.
+
+# Analysing the results
+
+We now make a prediction with the out-of-sample part of the data and create a confusion matrix 
+from that prediction and the reference values of that part.
+
+### Confusion matrix SVM
+```{r}
+predsvm <- predict(svm, testPart)
+confusionMatrix(predsvm, as.factor(testPart$classe))
+```
+
+### Confusion matrix RF
+
+```{r}
+predrf <- predict(rf, testPart)
+confusionMatrix(predrf, as.factor(testPart$classe))
+```
+
+### Confusion matrix GBM
+
+```{r}
+predgbm <- predict(gbm, testPart)
+confusionMatrix(predgbm, as.factor(testPart$classe))
+```
+
+
+# Conclusion
+
+### Best model and out-of-sample error
+
+The Random Forest model gave the highest accuracy so we select that for the actual prediction.
+
+With an accuracy on the out-of-sample data of 0.993 we have an out-of-sample error of 1 - 0.993 = 0.007 or 0.7% with a 95% confidence interval.
+
+
+### Predicting values for the test set
+
+
+Finally, generate a result for the test set. We use the *Random Forest* algorithm as that 
+gave the best outcome.
+
+```{r}
+test_values <- predict(rf,testing)
+test_values
+```
+
+
+# References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
